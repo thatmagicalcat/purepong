@@ -1,7 +1,6 @@
 {-# LANGUAGE CApiFFI #-}
 
 import Foreign
-import Foreign.Storable
 import Foreign.C.Types
 import Foreign.C.String
 
@@ -52,37 +51,67 @@ updateGameState state = do
     down <- C.isKeyDown C.keyS
     dt <- C.getFrameTime
 
+    -- Paddle
     let py = paddleY state 
-    let newPaddleY = if up == 1 then
-            round $ fromIntegral py - paddleMoveSpeed * dt
-        else if down == 1 then
-                round $ fromIntegral py + paddleMoveSpeed * dt
-            else py
+    let npy = if up == 1 then
+                  round $ fromIntegral py - paddleMoveSpeed * dt
+              else if down == 1 then
+                  round $ fromIntegral py + paddleMoveSpeed * dt
+              else py
 
-    -- Ball
-    let bx = fromIntegral (ballX state)
-    let by = fromIntegral (ballY state)
+    let newPaddleY = if npy >= 0 && npy + paddleHeight <= windowHeight then npy else py
+
+    -- Ball motion
+    let bx = ballX state
+    let by = ballY state
     let vx = ballVX state
     let vy = ballVY state
-    let newBallX = round $ fromIntegral bx + fromIntegral vx * dt :: CInt
-    let newBallY = round $ fromIntegral by + fromIntegral vy * dt :: CInt
 
-    let (vx', bx') =
-            if newBallX - round ballRadius < 0 || fromIntegral newBallX + ballRadius > fromIntegral windowWidth
-                then (-vx, ballX state)
-                else (vx, newBallX)
+    let bx' = bx + round (fromIntegral vx * dt)
+    let by' = by + round (fromIntegral vy * dt)
 
-    let (vy', by') =
-            if newBallY - round ballRadius < 0 || fromIntegral newBallY + ballRadius > fromIntegral windowHeight
-                then (-vy, ballY state)
-                else (vy, newBallY)
+    -- Wall collision (top/bottom)
+    let (vy', finalBy) =
+            if by' - round ballRadius < 0 || by' + round ballRadius > windowHeight
+                then (-vy, by)
+                else (vy, by')
+
+    -- Paddle collision
+    let ballLeft   = bx' - round ballRadius
+    let ballRight  = bx' + round ballRadius
+    let ballTop    = by' - round ballRadius
+    let ballBottom = by' + round ballRadius
+
+    let lpX = leftPaddleX state
+    let rpX = rightPaddleX state
+    let paddleTop = newPaddleY
+    let paddleBottom = newPaddleY + paddleHeight
+
+    let hitLeftPaddle =
+            ballLeft   <= lpX + paddleWidth &&
+            ballRight  >= lpX &&
+            ballBottom >= paddleTop &&
+            ballTop    <= paddleBottom
+
+    let hitRightPaddle =
+            ballRight  >= rpX &&
+            ballLeft   <= rpX + paddleWidth &&
+            ballBottom >= paddleTop &&
+            ballTop    <= paddleBottom
+
+    let (vx', finalBx) =
+            if hitLeftPaddle || hitRightPaddle
+                then (-vx, bx)
+                else if ballLeft < 0 || ballRight > windowWidth
+                    then (-vx, bx)
+                    else (vx, bx')
 
     return GameState {
-        leftPaddleX = leftPaddleX state,
-        rightPaddleX = rightPaddleX state,
+        leftPaddleX = lpX,
+        rightPaddleX = rpX,
         paddleY = newPaddleY,
-        ballX = bx',
-        ballY = by',
+        ballX = finalBx,
+        ballY = finalBy,
         ballVX = vx',
         ballVY = vy'
     }
